@@ -19,6 +19,11 @@ class TocItem():
     wordcount = 0
 
 
+class SpineItem():
+    href = ""
+    spine_id = ""
+
+
 def clear_output():
     global accumulator
     accumulator = ""
@@ -56,7 +61,7 @@ def process_toc_ncx(tocfile:str):
         tocitem = TocItem()
         for child in navPoint:
             if "navLabel" in child.tag:
-                tocitem.title = "".join(child.itertext())
+                tocitem.title = "".join(child.itertext()).strip()
             if "content" in child.tag:
                 tocitem.src = child.get("src","-")
         tocitems.append(tocitem)
@@ -71,7 +76,7 @@ def process_toc_html(tocfile:str):
             match = regex.search(pattern, line)
             if match:
                 tocitem = TocItem()
-                tocitem.title = match.group(2)
+                tocitem.title = match.group(2).strip()
                 tocitem.src = match.group(1)
                 tocitems.append(tocitem)
         tf.close()
@@ -79,20 +84,65 @@ def process_toc_html(tocfile:str):
 
 def process_content_opf(opffile:str):
     global tocitems
+    read_spine(opffile)
+    for spineitem in spineitems:
+        tocitem = TocItem()
+        temp = regex.sub(r'\.x?html', '', spineitem.href)
+        tocitem.title = regex.sub(r'[\-_]', ' ', temp).strip()
+        tocitem.src = spineitem.href
+        tocitems.append(tocitem)
+
+
+def read_spine(opffile:str):
+    global spineitems
+    spineitems = []
+    manifest_items = []
     with open(opffile, "r") as opf:
-        lines = opf.readlines
-        pattern = r'<item href="(.*?)" id="(.*?)\.xhtml"'
+        lines = opf.readlines()
+        # first, have to read the manifest, which has the correct URLs
+        # manifest is not in same order as the spine! Need it in spine order
+        pattern = r'<item href="(.*?)" id="(.*?)"'
         for line in lines:
             match = regex.search(pattern, line)
             if match:
-                tocitem = TocItem()
-                tocitem.title = match.group(2)
-                tocitem.src = match.group(1)
-                tocitems.append(tocitem)
+                manifest_item = SpineItem()
+                manifest_item.href = match.group(1)
+                manifest_item.spine_id = match.group(2)
+                manifest_items.append(manifest_item)
+        pattern = r'<itemref idref="(.*?)"'
+        for line in lines:
+            match = regex.search(pattern, line)
+            if match:
+                spineitem = SpineItem()
+                spineitem.spine_id = match.group(1)
+                spineitems.append(spineitem)
+        for spineitem in spineitems:
+            for manifest_item in manifest_items:
+                if manifest_item.spine_id == spineitem.spine_id:
+                    spineitem.href = manifest_item.href
         opf.close()
 
 
-def process_file(epub_folder: str, path_to_file:str, bookname: str):
+def recursive_find(wanted:str, root_path: str) -> str:
+    return_val = None
+    for root, dirs, files in os.walk(root_path, topdown=True):
+        for afile in files:
+            # print(os.path.join(root, afile))
+            if wanted in afile:
+                return os.path.join(root, afile)
+        for folder in dirs:
+            return_val = recursive_find(wanted=wanted, root_path=os.path.join(root, folder))
+            if return_val:
+                return return_val
+    return return_val
+
+
+def get_content_opf_file() -> str:
+    opf_file = recursive_find(".opf", temp_unzip)  # might be called content.opf or package.opf or whatever.
+    return opf_file
+
+
+def process_epub(epub_folder: str, path_to_file:str, bookname: str):
     global tocitems
 
     # we start by unpacking the epub (which is just a zip file)
@@ -100,29 +150,32 @@ def process_file(epub_folder: str, path_to_file:str, bookname: str):
     with zipfile.ZipFile(path_to_file, 'r') as zip_ref:
         zip_ref.extractall(temp_unzip)
 
-    # now try to find ToC in various ways
-    for (root, dirs, files) in os.walk(temp_unzip, topdown=True):
-        # try first for a toc.ncx file
-        for afile in files:
-            filepath = os.path.join(root, afile)
-            if "toc.ncx" in filepath:
-                process_toc_ncx(filepath)
-                process_tocitems(filepath, bookname=bookname)
-                return
-        # if not, look for a toc.xhtml
-        for afile in files:
-            filepath = os.path.join(root, afile)                
-            if "toc.html" in filepath or "toc.xhtml" in filepath:
-                process_toc_html(filepath)
-                process_tocitems(filepath, bookname=bookname)
-                return
-        # this is desperation, no toc.ncx or toc.xhtml, so read spine then try to find title    
-        for afile in files:
-           filepath = os.path.join(root, afile)
-           if "content.opf" in filepath:
-                process_content_opf(filepath)
-                process_tocitems(filepath, bookname=bookname, read_title=True)
-                return
+    opf_file = get_content_opf_file()  # may return None
+
+    # now try to find toc in various ways
+    toc_path = recursive_find("toc.ncx", temp_unzip)
+    if toc_path:
+        process_toc_ncx(toc_path)
+        process_tocitems(toc_path, bookname=bookname)
+        return
+
+    toc_path = recursive_find("toc.html", temp_unzip)
+    if not toc_path:
+        toc_path = recursive_find("toc.xhtml", temp_unzip)
+    if toc_path:
+        process_toc_html(toc_path)
+        process_tocitems(toc_path, bookname=bookname)
+        return
+
+    # this is desperation, no toc.ncx or toc.xhtml, so read spine then try to find titles
+    if not opf_file:
+        print("Couldn't find content.opf")
+        exit(-1)
+
+    toc_path = opf_file    
+    process_content_opf(opf_file)
+    process_tocitems(toc_path, bookname=bookname, read_title=True)
+    return
 
 
 def process_tocitems(filepath: str, bookname:str, read_title: bool = False):
@@ -213,7 +266,7 @@ def main() -> None:
                 if not make_csv:
                     collect_output(f"\n\nprocessing {afile}")
                 path = os.path.join(epub_folder, afile)
-                process_file(epub_folder, path, bookname)
+                process_epub(epub_folder, path, bookname)
         if make_csv:
             write_output(os.path.join(epub_folder,"results.csv"))
         else:
