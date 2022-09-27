@@ -377,7 +377,7 @@ def main() -> None:
             write_output(os.path.join(epub_folder,"results.csv"))
         else:
             write_output(os.path.join(epub_folder,"results.txt"))            
-        # remove_unzip_folder()
+        remove_unzip_folder()
     else:
         print("ERROR: No such directory!")
         exit(-1)
