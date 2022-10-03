@@ -253,7 +253,7 @@ def process_epub(epub_folder: str, path_to_file:str, bookname: str):
 
     # we start by unpacking the epub (which is just a zip file)
     create_unzip_folder(epub_folder)
-    with zipfile.ZipFile(path_to_file, 'r', encoding="utf8") as zip_ref:
+    with zipfile.ZipFile(path_to_file, 'r') as zip_ref:
         zip_ref.extractall(temp_unzip)
 
     tocitems = []
@@ -307,7 +307,7 @@ def process_tocitems(filepath: str, bookname:str, read_title: bool = False):
 
         html_file = os.path.join(head, tocitem.href)
         if os.path.exists(html_file):
-            with open(html_file,"r") as hf:
+            with open(html_file,"r", encoding="utf8") as hf:
                 html = hf.read()
                 hf.close()
 
