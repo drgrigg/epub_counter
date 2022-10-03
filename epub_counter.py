@@ -13,13 +13,14 @@ temp_unzip = ""
 tocitems = []
 spineitems = []
 accumulator = ""
-make_csv = False
+make_csv = True
 
 # there may be a one to many relationship between TocItem and SpineItem
 
 class TocItem():
     title = ""
     href = ""
+    order = 0
     word_count = 0
 
 
@@ -40,7 +41,7 @@ def collect_output(to_write:str):
 
 
 def write_output(fpath: str):
-    with open(fpath, "w") as outfile:
+    with open(fpath, 'w', encoding='utf-8') as outfile:
         outfile.write(accumulator)
 
 
@@ -56,6 +57,7 @@ def href_to_filepath(href: str) -> str:
 def process_toc_ncx(tocfile:str):
     # this is an xml file, a bit messy to parse
     global tocitems
+    toc_count = 0
     tree = ET.parse(tocfile)
     root = tree.getroot()
     tocitems = []
@@ -81,11 +83,14 @@ def process_toc_ncx(tocfile:str):
                     bits = tocitem.href.split("#")
                     tocitem.href = bits[0]
                 tocitem.href = href_to_filepath(tocitem.href)
+        toc_count += 1
+        tocitem.order = toc_count
         tocitems.append(tocitem)
 
 
 def process_toc_html(tocfile:str):
     global tocitems
+    toc_count = 0
     with open(tocfile, "r") as tf:
         lines = tf.readlines()
         pattern = r'<a href="(.*?)">(.*?)</a>'
@@ -99,6 +104,8 @@ def process_toc_html(tocfile:str):
                     bits = tocitem.href.split("#")
                     tocitem.href = bits[0]
                 tocitem.href = href_to_filepath(tocitem.href)
+                toc_count += 1
+                tocitem.order = toc_count
                 tocitems.append(tocitem)
         tf.close()
 
@@ -106,6 +113,7 @@ def process_toc_html(tocfile:str):
 def process_content_opf(opffile:str):
     # this should only be called if we can't find toc
     global tocitems
+    toc_count = 0
     # read_spine(opffile)  # spine should already have been read
     for spineitem in spineitems:
         tocitem = TocItem()
@@ -113,6 +121,8 @@ def process_content_opf(opffile:str):
         tocitem.title = regex.sub(r'[\-_]', ' ', temp).strip()
         tocitem.href = spineitem.href
         tocitem.href = href_to_filepath(tocitem.href)
+        toc_count += 1
+        tocitem.order = toc_count
         tocitems.append(tocitem)
 
 
@@ -233,7 +243,7 @@ def allocate_count_to_tocitems(bookname: str):
 def output_results(bookname):
     for tocitem in tocitems:
         if make_csv:
-            collect_output(f'"{bookname}","{tocitem.title}",{tocitem.word_count}')
+            collect_output(f'"{bookname}","{tocitem.title}", {tocitem.order}, {tocitem.word_count}')
         else:
             collect_output(f"{tocitem.title}: {tocitem.word_count} words")
 
@@ -243,7 +253,7 @@ def process_epub(epub_folder: str, path_to_file:str, bookname: str):
 
     # we start by unpacking the epub (which is just a zip file)
     create_unzip_folder(epub_folder)
-    with zipfile.ZipFile(path_to_file, 'r') as zip_ref:
+    with zipfile.ZipFile(path_to_file, 'r', encoding="utf8") as zip_ref:
         zip_ref.extractall(temp_unzip)
 
     tocitems = []
@@ -258,7 +268,7 @@ def process_epub(epub_folder: str, path_to_file:str, bookname: str):
     read_spine(opf_file)  # this also counts words in each spine item
 
     # now try to find toc in various ways
-    toc_path = recursive_find("toc.ncx", temp_unzip)
+    toc_path = recursive_find(".ncx", temp_unzip)
     if toc_path:
         process_toc_ncx(toc_path)
         allocate_count_to_tocitems(bookname)
@@ -348,19 +358,21 @@ def main() -> None:
 
     # directory of epub files must be passed as first argument on command line
     if len(sys.argv) < 2:
-        print("""USAGE: epub_counter DIRECTORY [-c]
+        print("""USAGE: epub_counter DIRECTORY [-t]
         where DIRECTORY is a directory of the epubs we want to process
-        and -c optional output as CSV file""")
+        and -t optional output as simple text rather than CSV file""")
         exit(0)
 
     epub_folder = sys.argv[1]
 
     # check to see if CSV output is wanted and if so, set flag
     if len(sys.argv) > 2:
-        if sys.argv[2].lower() == "-c":
-            make_csv = True
-            # write field names for CSV
-            collect_output(f'"Book","Title","Words"')
+        if sys.argv[2].lower() == "-t":
+            make_csv = False
+    
+    # write field names for CSV at top of output file
+    if make_csv:
+        collect_output(f'"Book","Title","Order","Words"')
 
     if os.path.exists(epub_folder):
         # cycle through each file in the folder and process if it's an epub.
