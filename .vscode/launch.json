@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["/Users/david/WorkingFiles/Python/epub_counter/epubs","-c"]
+            "args": ["/Users/david/WorkingFiles/Python/epub_counter/epubs"]
         }
     ]
 }
